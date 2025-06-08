@@ -29,20 +29,27 @@ async def run():
             tools = await load_mcp_tools(session)
             agent = create_react_agent(model, tools)
 
-            ##### REQUEST & REPOND #####
-            user_input = input("질문을 입력하세요: ")
+            while True: 
+                try:
+                    ##### REQUEST & REPOND #####
+                    user_input = input("질문을 입력하세요: ")
+                    if user_input.lower() in ["quit","exit","q"]:
+                        print("종료합니다.")
+                        break
+                    print("=====PROMPT=====")
+                    prompts = await load_mcp_prompt(
+                        session, "default_prompt", arguments={"message": user_input}
+                    )
+                    print("prompts : ", prompts)
+                    response = await agent.ainvoke({"messages": prompts})
+                    # response = await agent.ainvoke({"messages": user_input})
 
-            print("=====PROMPT=====")
-            prompts = await load_mcp_prompt(
-                session, "default_prompt", arguments={"message": user_input}
-            )
-            print("prompts : ", prompts)
-            response = await agent.ainvoke({"messages": prompts})
-            # response = await agent.ainvoke({"messages": user_input})
-
-            print(response)
-            print("=====RESPONSE=====")
-            print(response["messages"][-1].content)
+                    print(response)
+                    print("=====RESPONSE=====")
+                    print(response["messages"][-1].content)
+                except:
+                    print("종료합니다.")
+                    break;
 
 
 import asyncio
