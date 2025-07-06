@@ -19,9 +19,15 @@ server_params = StdioServerParameters(
     args=["./data_server.py"],
 )
 
+#session이 있어야
+# 툴을 로드할 수 있고 (load_mcp_tools)
+# 프롬프트를 서버로부터 받아올 수 있고 (load_mcp_prompt)
+# MCP 프로토콜에 맞는 통신이 가능
 
+# stdio_client는 단순 연결만 담당
+# ClientSession이 MCP 서버와의 세션(상태) 관리와 통신 로직을 담당
 async def run():
-    async with stdio_client(server_params) as (read, write):
+    async with stdio_client(server_params) as (read, write):       
         async with ClientSession(read, write) as session:
             await session.initialize()
 
