@@ -1,17 +1,100 @@
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.prompts import base
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import hashlib
+import json
+import os
 
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.prompts import base
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, root_mean_squared_error
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from dotenv import load_dotenv
+from pptx import Presentation
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.chains import RetrievalQA
+from langchain_community.chat_models import ChatOpenAI
 
+load_dotenv()
+os.getenv("OPENAI_API_KEY")
 
 mcp = FastMCP("DataAnalysis")
 
+ppt_folder = "./pptx"
+index_folder = "faiss_ppt_index"
+meta_path = os.path.join(index_folder, "index_meta.json")
+
+def get_ppt_folder_hash(folder_path: str) -> str:
+    """
+    현재 pptx 폴더 내 파일명 + 수정시간 기준으로 해시를 계산합니다.
+    """
+    files = sorted([
+        (f, os.path.getmtime(os.path.join(folder_path, f)))
+        for f in os.listdir(folder_path)
+        if f.endswith(".pptx")
+    ])
+    hash_input = json.dumps(files).encode()
+    return hashlib.md5(hash_input).hexdigest()
+
+
+@mcp.tool()
+def search_ppt(query: str) -> str:
+    """
+    Search and summarize the content of PowerPoint (.pptx) files related to a given question.
+    
+    This tool loads PowerPoint slides stored in the ./pptx directory, indexes the text using a vector database (FAISS),
+    and uses a language model to answer the user's question based on the content of the slides.
+    
+    Args:
+        query (str): A natural language question to ask about the slide content.
+
+    Returns:
+        str: The LLM-generated answer based on slide content.
+    """
+
+    ppt_hash = get_ppt_folder_hash(ppt_folder)
+    need_update = True
+
+    if os.path.exists(index_folder) and os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                saved_hash = json.load(f).get("ppt_hash")
+                if saved_hash == ppt_hash:
+                    need_update = False
+        except Exception:
+            pass
+
+    if need_update:
+        all_text = []
+        for fname in os.listdir(ppt_folder):
+            if fname.endswith(".pptx"):
+                prs = Presentation(os.path.join(ppt_folder, fname))
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            all_text.append(shape.text)
+
+        text = "\n".join(all_text)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        docs = text_splitter.create_documents([text])
+
+        vectordb = FAISS.from_documents(docs, OpenAIEmbeddings())
+        vectordb.save_local(index_folder)
+
+        os.makedirs(index_folder, exist_ok=True)
+        with open(meta_path, "w") as f:
+            json.dump({"ppt_hash": ppt_hash}, f)
+    else:
+        vectordb = FAISS.load_local(index_folder, OpenAIEmbeddings())
+
+    retriever = vectordb.as_retriever()
+    qa = RetrievalQA.from_chain_type(llm=ChatOpenAI(model="gpt-4o"), retriever=retriever)
+    result = qa.run(query)
+    return result
 
 @mcp.tool()
 def describe_column(csv_path: str, column: str) -> dict:
